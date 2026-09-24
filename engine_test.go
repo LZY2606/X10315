@@ -1,0 +1,331 @@
+package liquid
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/osteele/liquid/render"
+
+	"github.com/stretchr/testify/require"
+)
+
+var emptyBindings = map[string]any{}
+
+var errTestWriter = errors.New("test writer failure")
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errTestWriter
+}
+
+// There's a lot more tests in the filters and tags sub-packages.
+// This collects a minimal set for testing end-to-end.
+var liquidTests = []struct{ in, expected string }{
+	{`{{ page.title }}`, "Introduction"},
+	{`{% if x %}true{% endif %}`, "true"},
+	{`{{ "upper" | upcase }}`, "UPPER"},
+}
+
+var testBindings = map[string]any{
+	"x":  123,
+	"ar": []string{"first", "second", "third"},
+	"page": map[string]any{
+		"title": "Introduction",
+	},
+}
+
+func TestEngine_ParseAndRenderString(t *testing.T) {
+	engine := NewEngine()
+
+	for i, test := range liquidTests {
+		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
+			out, err := engine.ParseAndRenderString(test.in, testBindings)
+			require.NoErrorf(t, err, test.in)
+			require.Equalf(t, test.expected, out, test.in)
+		})
+	}
+}
+
+func TestBasicEngine_ParseAndRenderString(t *testing.T) {
+	engine := NewBasicEngine()
+
+	t.Run("1", func(t *testing.T) {
+		test := liquidTests[0]
+		out, err := engine.ParseAndRenderString(test.in, testBindings)
+		require.NoErrorf(t, err, test.in)
+		require.Equalf(t, test.expected, out, test.in)
+	})
+
+	for i, test := range liquidTests[1:] {
+		t.Run(strconv.Itoa(i+2), func(t *testing.T) {
+			out, err := engine.ParseAndRenderString(test.in, testBindings)
+			require.Errorf(t, err, test.in)
+			require.Emptyf(t, out, test.in)
+		})
+	}
+}
+
+type capWriter struct {
+	bytes.Buffer
+}
+
+func (c *capWriter) Write(bs []byte) (int, error) {
+	return c.Buffer.Write([]byte(strings.ToUpper(string(bs))))
+}
+
+func TestEngine_ParseAndFRender(t *testing.T) {
+	engine := NewEngine()
+
+	for i, test := range liquidTests {
+		t.Run(strconv.Itoa(i+1), func(t *testing.T) {
+			wr := capWriter{}
+			err := engine.ParseAndFRender(&wr, []byte(test.in), testBindings)
+			require.NoErrorf(t, err, test.in)
+			require.Equalf(t, strings.ToUpper(test.expected), wr.String(), test.in)
+		})
+	}
+}
+
+func TestEngine_ParseAndRenderString_ptr_to_hash(t *testing.T) {
+	params := map[string]any{
+		"message": &map[string]any{
+			"Text":       "hello",
+			"jsonNumber": json.Number("123"),
+		},
+	}
+	engine := NewEngine()
+	template := "{{ message.Text }} {{message.jsonNumber}}"
+	str, err := engine.ParseAndRenderString(template, params)
+	require.NoError(t, err)
+	require.Equal(t, "hello 123", str)
+}
+
+type testStruct struct{ Text string }
+
+func TestEngine_ParseAndRenderString_struct(t *testing.T) {
+	params := map[string]any{
+		"message": testStruct{
+			Text: "hello",
+		},
+	}
+	engine := NewEngine()
+	template := "{{ message.Text }}"
+	str, err := engine.ParseAndRenderString(template, params)
+	require.NoError(t, err)
+	require.Equal(t, "hello", str)
+}
+
+func TestEngine_ParseAndRender_errors(t *testing.T) {
+	_, err := NewEngine().ParseAndRenderString("{{ syntax error }}", emptyBindings)
+	require.Error(t, err)
+	_, err = NewEngine().ParseAndRenderString("{% if %}", emptyBindings)
+	require.Error(t, err)
+	_, err = NewEngine().ParseAndRenderString("{% undefined_tag %}", emptyBindings)
+	require.Error(t, err)
+	_, err = NewEngine().ParseAndRenderString("{% a | undefined_filter %}", emptyBindings)
+	require.Error(t, err)
+}
+
+func BenchmarkEngine_Parse(b *testing.B) {
+	engine := NewEngine()
+
+	buf := new(bytes.Buffer)
+	for range 1000 {
+		_, err := io.WriteString(buf, `if{% if true %}true{% elsif false %}elsif{% else %}else{% endif %}`)
+		require.NoError(b, err)
+		_, err = io.WriteString(buf, `loop{% for item in array %}loop{% break %}{% endfor %}`)
+		require.NoError(b, err)
+		_, err = io.WriteString(buf, `case{% case value %}{% when a %}{% when b %}{% endcase %}`)
+		require.NoError(b, err)
+		_, err = io.WriteString(buf, `expr{{ a and b }}{{ a | plus: b }}`)
+		require.NoError(b, err)
+	}
+
+	s := buf.Bytes()
+
+	b.ResetTimer()
+
+	for range b.N {
+		_, err := engine.ParseTemplate(s)
+		require.NoError(b, err)
+	}
+}
+
+func TestEngine_ParseTemplateAndCache(t *testing.T) {
+	// Given two templates...
+	templateA := []byte("Foo")
+	templateB := []byte(`{% include "template_a.html" %}, Bar`)
+
+	// Cache the first
+	eng := NewEngine()
+	_, err := eng.ParseTemplateAndCache(templateA, "template_a.html", 1)
+	require.NoError(t, err)
+
+	// ...and execute the second.
+	result, err := eng.ParseAndRender(templateB, Bindings{})
+	require.NoError(t, err)
+	require.Equal(t, "Foo, Bar", string(result))
+}
+
+type MockTemplateStore struct{}
+
+func (tl *MockTemplateStore) ReadTemplate(filename string) ([]byte, error) {
+	template := []byte(fmt.Sprintf("Message Text: {{ message.Text }} from: %v.", filename))
+	return template, nil
+}
+
+func Test_template_store(t *testing.T) {
+	template := []byte(`{% include "template.liquid" %}`)
+	mockstore := &MockTemplateStore{}
+	params := map[string]any{
+		"message": testStruct{
+			Text: "filename",
+		},
+	}
+	engine := NewEngine()
+	engine.RegisterTemplateStore(mockstore)
+	out, _ := engine.ParseAndRenderString(string(template), params)
+	require.Equal(t, "Message Text: filename from: template.liquid.", out)
+}
+
+func TestEngine_LaxFilters(t *testing.T) {
+	// Default: undefined filters cause an error
+	engine := NewEngine()
+	_, err := engine.ParseAndRenderString(`{{ "hello" | nofilter }}`, emptyBindings)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined filter")
+
+	// LaxFilters: undefined filters pass through the value
+	engine = NewEngine()
+	engine.LaxFilters()
+	out, err := engine.ParseAndRenderString(`{{ "hello" | nofilter }}`, emptyBindings)
+	require.NoError(t, err)
+	require.Equal(t, "hello", out)
+
+	// LaxFilters: defined filters still work
+	out, err = engine.ParseAndRenderString(`{{ "hello" | upcase }}`, emptyBindings)
+	require.NoError(t, err)
+	require.Equal(t, "HELLO", out)
+}
+
+func TestEngine_Delims(t *testing.T) {
+	engine := NewEngine()
+	engine.Delims("<%=", "%>", "<%", "%>")
+
+	out, err := engine.ParseAndRenderString(`<%= x %>`, testBindings)
+	require.NoError(t, err)
+	require.Equal(t, "123", out)
+
+	// standard delimiters should not work
+	out, err = engine.ParseAndRenderString(`{{ x }}`, testBindings)
+	require.NoError(t, err)
+	require.Equal(t, "{{ x }}", out)
+}
+
+func TestEngine_DelimsEmptyValuesUseDefaults(t *testing.T) {
+	engine := NewEngine().Delims("", "", "", "")
+	out, err := engine.ParseAndRenderString(`{{ x }}`, testBindings)
+	require.NoError(t, err)
+	require.Equal(t, "123", out)
+}
+
+func TestEngine_StrictVariables(t *testing.T) {
+	engine := NewEngine()
+	engine.StrictVariables()
+
+	// defined variable works
+	out, err := engine.ParseAndRenderString(`{{ x }}`, testBindings)
+	require.NoError(t, err)
+	require.Equal(t, "123", out)
+
+	// undefined variable causes error
+	_, err = engine.ParseAndRenderString(`{{ undefined_var }}`, testBindings)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined variable")
+
+	// Nil literals and bindings are defined values.
+	out, err = engine.ParseAndRenderString(`{{ nil }}|{{ value }}|{{ object.value }}`, Bindings{
+		"value":  nil,
+		"object": map[string]any{"value": nil},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "||", out)
+
+	_, err = engine.ParseAndRenderString(`{{ object.missing }}`, Bindings{"object": map[string]any{}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefined variable")
+}
+
+func TestFRenderReturnsWriterErrors(t *testing.T) {
+	engine := NewEngine()
+	err := engine.ParseAndFRender(failingWriter{}, []byte("buffered output"), emptyBindings)
+	require.ErrorIs(t, err, errTestWriter)
+}
+
+func TestEngine_EnableJekyllExtensions(t *testing.T) {
+	engine := NewEngine()
+	engine.EnableJekyllExtensions()
+
+	out, err := engine.ParseAndRenderString(
+		`{% assign page.url = "/about/" %}{{ page.url }}`,
+		map[string]any{"page": map[string]any{}},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "/about/", out)
+}
+
+func TestEngine_JekyllAssignmentDoesNotMutateBindings(t *testing.T) {
+	engine := NewEngine()
+	engine.EnableJekyllExtensions()
+	page := map[string]any{"url": "/before/"}
+
+	out, err := engine.ParseAndRenderString(
+		`{% assign page.url = "/after/" %}{{ page.url }}`,
+		map[string]any{"page": page},
+	)
+	require.NoError(t, err)
+	require.Equal(t, "/after/", out)
+	require.Equal(t, "/before/", page["url"])
+}
+
+func TestEngine_SetAutoEscapeReplacer(t *testing.T) {
+	engine := NewEngine()
+	engine.SetAutoEscapeReplacer(render.HtmlEscaper)
+
+	// HTML should be escaped
+	out, err := engine.ParseAndRenderString(`{{ html }}`, map[string]any{
+		"html": "<b>bold</b>",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "&lt;b&gt;bold&lt;/b&gt;", out)
+
+	// safe filter bypasses escaping
+	out, err = engine.ParseAndRenderString(`{{ html | safe }}`, map[string]any{
+		"html": "<b>bold</b>",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "<b>bold</b>", out)
+}
+
+func TestEngine_UnregisterTag(t *testing.T) {
+	engine := NewEngine()
+	engine.RegisterTag("echo", func(c render.Context) (string, error) {
+		return c.TagArgs(), nil
+	})
+	source := `{% echo hello world %}`
+
+	_, err := engine.ParseAndRenderString(source, emptyBindings)
+	require.NoError(t, err)
+
+	engine.UnregisterTag("echo")
+
+	_, err = engine.ParseAndRenderString(source, emptyBindings)
+	require.Error(t, err)
+}
