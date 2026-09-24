@@ -103,7 +103,7 @@ func (v wrapperValue) IndexValue(Value) Value    { return undefinedValue }
 func (v wrapperValue) Contains(Value) bool       { return false }
 func (v wrapperValue) Interface() any            { return v.value }
 func (v wrapperValue) PropertyValue(Value) Value { return undefinedValue }
-func (v wrapperValue) Test() bool                { return v.value != nil && v.value != false }
+func (v wrapperValue) Test() bool                { return IsTruthy(v.value) }
 
 func (v wrapperValue) Int() int {
 	if n, ok := v.value.(int); ok {

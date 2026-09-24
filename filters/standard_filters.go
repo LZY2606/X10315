@@ -137,7 +137,7 @@ func AddStandardFilters(fd FilterDictionary) { //nolint: gocyclo
 				}
 			}
 		} else {
-			if value == nil || value == false || values.IsEmpty(value) {
+			if !values.IsTruthy(value) || values.IsEmpty(value) {
 				value = defaultValue
 			}
 		}
@@ -569,7 +569,7 @@ func whereFilter(a []any, key string, targetValue func(any) any) (result []any) 
 		prop := value.PropertyValue(keyValue).Interface()
 		if target == omittedWhereTarget {
 			// One-arg form: truthy check
-			if prop != nil && prop != false {
+			if values.IsTruthy(prop) {
 				result = append(result, obj)
 			}
 		} else {

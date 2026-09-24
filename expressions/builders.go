@@ -48,12 +48,7 @@ func makeFilter(fn valueFn, name string, args *filterArgs) valueFn {
 func makeIndexExpr(sequenceFn, indexFn func(Context) values.Value) func(Context) values.Value {
 	return func(ctx Context) values.Value {
 		index := indexFn(ctx)
-		value := sequenceFn(ctx).IndexValue(index)
-		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
-		}
-
-		return value
+		return requireDefined(ctx, sequenceFn(ctx).IndexValue(index))
 	}
 }
 
@@ -61,11 +56,17 @@ func makeObjectPropertyExpr(objFn func(Context) values.Value, name string) func(
 	index := values.ValueOf(name)
 
 	return func(ctx Context) values.Value {
-		value := objFn(ctx).PropertyValue(index)
-		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
-		}
-
-		return value
+		return requireDefined(ctx, objFn(ctx).PropertyValue(index))
 	}
+}
+
+// requireDefined is the shared variable-lookup guard for the bracket (index)
+// and dot (property) expression nodes. It panics with an InterpreterError when
+// strict variables are enabled and the lookup produced an undefined value.
+func requireDefined(ctx Context, value values.Value) values.Value {
+	if strictVariables(ctx) && values.IsUndefined(value) {
+		panic(InterpreterError("undefined variable"))
+	}
+
+	return value
 }
