@@ -13,6 +13,16 @@ func makeRangeExpr(startFn, endFn func(Context) values.Value) func(Context) valu
 	}
 }
 
+// guardUndefined is the shared judgment for variable lookup results.
+// Every lookup site — plain variables, index expressions, and property
+// expressions — reports a missing value through this single boundary, so
+// that strict variables mode behaves identically across AST nodes.
+func guardUndefined(ctx Context, undefined bool) {
+	if undefined && strictVariables(ctx) {
+		panic(InterpreterError("undefined variable"))
+	}
+}
+
 func makeContainsExpr(e1, e2 func(Context) values.Value) func(Context) values.Value {
 	return func(ctx Context) values.Value {
 		return values.ValueOf(e1(ctx).Contains(e2(ctx)))
@@ -49,9 +59,7 @@ func makeIndexExpr(sequenceFn, indexFn func(Context) values.Value) func(Context)
 	return func(ctx Context) values.Value {
 		index := indexFn(ctx)
 		value := sequenceFn(ctx).IndexValue(index)
-		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
-		}
+		guardUndefined(ctx, values.IsUndefined(value))
 
 		return value
 	}
@@ -62,9 +70,7 @@ func makeObjectPropertyExpr(objFn func(Context) values.Value, name string) func(
 
 	return func(ctx Context) values.Value {
 		value := objFn(ctx).PropertyValue(index)
-		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
-		}
+		guardUndefined(ctx, values.IsUndefined(value))
 
 		return value
 	}

@@ -109,6 +109,20 @@ type loopRenderer struct {
 	tagName string
 }
 
+// setForloopMetadata records the loop position variables for iteration i of
+// a loop of length l. It is the single bookkeeping judgment shared by the
+// {% for %} tag and the {% render %} tag's "for" parameter, so that both AST
+// nodes expose identical forloop values.
+func setForloopMetadata(m map[string]any, i, l int) {
+	m["first"] = i == 0
+	m["last"] = i == l-1
+	m["index"] = i + 1
+	m["index0"] = i
+	m["rindex"] = l - i
+	m["rindex0"] = l - i - 1
+	m["length"] = l
+}
+
 func (loop loopRenderer) render(iter iterable, w io.Writer, ctx render.Context) error {
 	// loop decorator
 	decorator, err := makeLoopDecorator(loop, ctx)
@@ -125,28 +139,16 @@ func (loop loopRenderer) render(iter iterable, w io.Writer, ctx render.Context) 
 	cycleMap := map[string]int{}
 	// Pre-allocate the forloop map once and reuse it across iterations.
 	forloopMap := map[string]any{
-		"first":   false,
-		"last":    false,
-		"index":   0,
-		"index0":  0,
-		"rindex":  0,
-		"rindex0": 0,
-		"length":  0,
 		".cycles": cycleMap,
 	}
+	setForloopMetadata(forloopMap, 0, 0)
 	ctx.Set(forloopVarName, forloopMap)
 
 loop:
 
 	for i, l := 0, iter.Len(); i < l; i++ {
 		ctx.Set(loop.Variable, iter.Index(i))
-		forloopMap["first"] = i == 0
-		forloopMap["last"] = i == l-1
-		forloopMap["index"] = i + 1
-		forloopMap["index0"] = i
-		forloopMap["rindex"] = l - i
-		forloopMap["rindex0"] = l - i - 1
-		forloopMap["length"] = l
+		setForloopMetadata(forloopMap, i, l)
 		decorator.before(w, i)
 		err := ctx.RenderChildren(w)
 		decorator.after(w, i, l)

@@ -6,7 +6,6 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -349,23 +348,14 @@ func renderTag(source string) (func(io.Writer, render.Context) error, error) {
 	}
 
 	return func(w io.Writer, ctx render.Context) error {
-		templateNameValue, err := ctx.Evaluate(args.templateName)
-		if err != nil {
-			return err
-		}
-		templateName, ok := templateNameValue.(string)
-		if !ok {
-			return ctx.Errorf("render requires a string template name; got %T", templateNameValue)
-		}
-
 		fileRenderer, ok := ctx.(isolatedFileRenderer)
 		if !ok {
 			return ctx.Errorf("render requires isolated file rendering support")
 		}
 
-		filename, err := resolveTemplatePath(ctx.SourceFile(), templateName)
+		templateName, filename, err := evalTemplatePath(ctx, "render", args.templateName)
 		if err != nil {
-			return ctx.WrapError(err)
+			return err
 		}
 		alias := args.withAlias
 		if alias == "" {
@@ -452,15 +442,9 @@ func renderFor(
 	for i := 0; i < items.Len(); i++ {
 		scope := maps.Clone(params)
 		scope[alias] = items.Index(i)
-		scope["forloop"] = map[string]any{
-			"first":   i == 0,
-			"last":    i == items.Len()-1,
-			"index":   i + 1,
-			"index0":  i,
-			"length":  items.Len(),
-			"rindex":  items.Len() - i,
-			"rindex0": items.Len() - i - 1,
-		}
+		forloop := map[string]any{}
+		setForloopMetadata(forloop, i, items.Len())
+		scope["forloop"] = forloop
 
 		if fw, ok := fileRenderer.(isolatedFileWriter); ok {
 			if err := fw.RenderFileIsolatedTo(w, filename, scope); err != nil {
@@ -482,13 +466,8 @@ func renderFor(
 }
 
 func renderItems(value any) (iterable, bool) {
-	if value == nil {
-		return nil, false
-	}
-	rv := reflect.ValueOf(value)
-	if rv.Kind() != reflect.Array && rv.Kind() != reflect.Slice {
-		return nil, false
-	}
-
-	return sliceWrapper(rv), true
+	// Iterability is judged by the same boundary as the {% for %} tag, so
+	// that a collection renders identically under either AST node.
+	iter := makeIterator(value)
+	return iter, iter != nil
 }

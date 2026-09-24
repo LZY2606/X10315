@@ -129,7 +129,7 @@ func ifTagCompiler(polarity bool) func(render.BlockNode) (func(io.Writer, render
 					return err
 				}
 
-				if value != nil && value != false {
+				if values.IsTrue(value) {
 					return ctx.RenderBlock(w, b.body)
 				}
 			}

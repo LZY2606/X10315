@@ -569,7 +569,7 @@ func whereFilter(a []any, key string, targetValue func(any) any) (result []any) 
 		prop := value.PropertyValue(keyValue).Interface()
 		if target == omittedWhereTarget {
 			// One-arg form: truthy check
-			if prop != nil && prop != false {
+			if values.IsTrue(prop) {
 				result = append(result, obj)
 			}
 		} else {

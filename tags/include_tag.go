@@ -18,19 +18,9 @@ func includeTag(source string) (func(io.Writer, render.Context) error, error) {
 	}
 
 	return func(w io.Writer, ctx render.Context) error {
-		value, err := ctx.Evaluate(expr)
+		_, filename, err := evalTemplatePath(ctx, "include", expr)
 		if err != nil {
 			return err
-		}
-
-		rel, ok := value.(string)
-		if !ok {
-			return ctx.Errorf("include requires a string argument; got %v", value)
-		}
-
-		filename, err := resolveTemplatePath(ctx.SourceFile(), rel)
-		if err != nil {
-			return ctx.WrapError(err)
 		}
 
 		if fw, ok := ctx.(fileWriter); ok {

@@ -35,9 +35,7 @@ func (ctx *context) Clone() Context {
 // Get looks up a variable value in the expression context.
 func (ctx *context) Get(name string) any {
 	value, ok := ctx.bindings[name]
-	if !ok && ctx.Config.StrictVariables {
-		panic(InterpreterError("undefined variable"))
-	}
+	guardUndefined(ctx, !ok)
 
 	return values.ToLiquid(value)
 }

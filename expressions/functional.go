@@ -1,5 +1,7 @@
 package expressions
 
+import "github.com/osteele/liquid/values"
+
 type expressionWrapper struct {
 	fn func(ctx Context) (any, error)
 }
@@ -26,7 +28,7 @@ func Not(e Expression) Expression {
 				return nil, err
 			}
 
-			return (value == nil || value == false), nil
+			return !values.IsTrue(value), nil
 		},
 	}
 }
