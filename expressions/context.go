@@ -36,7 +36,7 @@ func (ctx *context) Clone() Context {
 func (ctx *context) Get(name string) any {
 	value, ok := ctx.bindings[name]
 	if !ok && ctx.Config.StrictVariables {
-		panic(InterpreterError("undefined variable"))
+		panicUndefinedVariable()
 	}
 
 	return values.ToLiquid(value)
@@ -54,4 +54,12 @@ func (ctx *context) StrictVariables() bool {
 func strictVariables(ctx Context) bool {
 	configured, ok := ctx.(interface{ StrictVariables() bool })
 	return ok && configured.StrictVariables()
+}
+
+// panicUndefinedVariable raises the engine's shared strict-variables error.
+// Missing bindings, properties, and indices all report through this path, so
+// that variable lookup fails identically in object, tag, and filter
+// expressions alike.
+func panicUndefinedVariable() {
+	panic(InterpreterError("undefined variable"))
 }

@@ -169,14 +169,9 @@ loop:
 func makeLoopDecorator(loop loopRenderer, ctx render.Context) (loopDecorator, error) {
 	if loop.tagName == "tablerow" {
 		if loop.Cols != nil {
-			val, err := ctx.Evaluate(loop.Cols)
+			cols, err := evaluateLoopIntModifier(ctx, loop.Cols, "cols")
 			if err != nil {
 				return nil, err
-			}
-
-			cols, ok := val.(int)
-			if !ok {
-				return nil, ctx.Errorf("loop cols must be an integer")
 			}
 
 			if cols > 0 {
@@ -237,14 +232,9 @@ func applyLoopModifiers(loop expressions.Loop, ctx render.Context, iter iterable
 	}
 
 	if loop.Offset != nil {
-		val, err := ctx.Evaluate(loop.Offset)
+		offset, err := evaluateLoopIntModifier(ctx, loop.Offset, "offset")
 		if err != nil {
 			return nil, err
-		}
-
-		offset, ok := val.(int)
-		if !ok {
-			return nil, ctx.Errorf("loop offset must be an integer")
 		}
 
 		if offset > 0 {
@@ -253,14 +243,9 @@ func applyLoopModifiers(loop expressions.Loop, ctx render.Context, iter iterable
 	}
 
 	if loop.Limit != nil {
-		val, err := ctx.Evaluate(loop.Limit)
+		limit, err := evaluateLoopIntModifier(ctx, loop.Limit, "limit")
 		if err != nil {
 			return nil, err
-		}
-
-		limit, ok := val.(int)
-		if !ok {
-			return nil, ctx.Errorf("loop limit must be an integer")
 		}
 
 		if limit >= 0 {
@@ -269,6 +254,24 @@ func applyLoopModifiers(loop expressions.Loop, ctx render.Context, iter iterable
 	}
 
 	return iter, nil
+}
+
+// evaluateLoopIntModifier evaluates a loop modifier expression to an int.
+// The offset, limit, and cols modifiers share this judgment, so that a
+// non-integer modifier is reported the same way in {% for %} and
+// {% tablerow %} loops.
+func evaluateLoopIntModifier(ctx render.Context, expr expressions.Expression, name string) (int, error) {
+	val, err := ctx.Evaluate(expr)
+	if err != nil {
+		return 0, err
+	}
+
+	n, ok := val.(int)
+	if !ok {
+		return 0, ctx.Errorf("loop %s must be an integer", name)
+	}
+
+	return n, nil
 }
 
 func makeIterator(value any) iterable {

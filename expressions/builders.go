@@ -50,7 +50,7 @@ func makeIndexExpr(sequenceFn, indexFn func(Context) values.Value) func(Context)
 		index := indexFn(ctx)
 		value := sequenceFn(ctx).IndexValue(index)
 		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
+			panicUndefinedVariable()
 		}
 
 		return value
@@ -63,7 +63,7 @@ func makeObjectPropertyExpr(objFn func(Context) values.Value, name string) func(
 	return func(ctx Context) values.Value {
 		value := objFn(ctx).PropertyValue(index)
 		if strictVariables(ctx) && values.IsUndefined(value) {
-			panic(InterpreterError("undefined variable"))
+			panicUndefinedVariable()
 		}
 
 		return value
