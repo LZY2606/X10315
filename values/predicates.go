@@ -21,3 +21,13 @@ func IsEmpty(value any) bool {
 		return false
 	}
 }
+
+// IsTruthy returns a bool indicating whether the value is true according to Liquid semantics:
+// every value except nil and false is truthy.
+//
+// This is the single truthiness judgment shared by the expression language
+// (and/or/not) and the control-flow tags (if/unless), so that every AST node
+// that branches on a value agrees on the outcome.
+func IsTruthy(value any) bool {
+	return ValueOf(value).Test()
+}
